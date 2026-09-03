@@ -1,0 +1,23 @@
+# Virtual environment
+.venv/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# IDE
+.idea/
+
+# Environment variables
+.env
+
+# Power BI temporary files
+*.tmp
+*.bak
+
+# Python generated cache
+.ipynb_checkpoints/
+
+# Large/generated data files
+data/raw/*.csv
+data/processed/*.csv
