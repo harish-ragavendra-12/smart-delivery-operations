@@ -23,14 +23,6 @@ shipping_priorities = [
     "Same Day"
 ]
 
-# Possible delivery statuses
-delivery_statuses = [
-    "Delivered",
-    "Delayed",
-    "Cancelled",
-    "Returned"
-]
-
 # Create lookup lists
 customer_ids = customers_df["customer_id"].tolist()
 hub_ids = hubs_df["hub_id"].tolist()
@@ -49,6 +41,19 @@ employees_by_hub = (
     .groupby("hub_id")["employee_id"]
     .apply(list)
     .to_dict()
+)
+
+# Create lookup dictionaries
+vehicle_info = (
+    vehicles_df
+    .set_index("vehicle_id")
+    .to_dict("index")
+)
+
+hub_info = (
+    hubs_df
+    .set_index("hub_id")
+    .to_dict("index")
 )
 
 # Destination cities
@@ -130,27 +135,128 @@ for i in range(1, NUM_ORDERS + 1):
         + timedelta(days=promised_days)
     )
 
-    # Generate actual delivery time
-    delivery_days = promised_days + random.randint(-1, 3)
+    # Get vehicle and hub information
+    vehicle = vehicle_info[vehicle_id]
+    hub = hub_info[origin_hub_id]
 
-    if delivery_days < 0:
-        delivery_days = 0
+    # Vehicle age
+    vehicle_age = 2026 - vehicle["registration_year"]
 
-    actual_delivery_date = (
-        order_date
-        + timedelta(days=delivery_days)
-    )
+    # Route distance
+    origin_city = hub["city"]
 
-    # Delivery status
-    status = random.choices(
-        delivery_statuses,
-        weights=[75, 15, 6, 4],
+    if origin_city == destination_city:
+        route_distance_km = random.randint(10, 40)
+    else:
+        route_distance_km = random.randint(100, 2200)
+
+    # --------------------------------------------------
+    # Calculate delay risk
+    # --------------------------------------------------
+
+    delay_probability = 0.08
+
+    # Longer routes have higher delay risk
+    if route_distance_km > 1500:
+        delay_probability += 0.08
+    elif route_distance_km > 800:
+        delay_probability += 0.05
+    elif route_distance_km > 300:
+        delay_probability += 0.03
+
+    # Heavy packages have slightly higher delay risk
+    if package_weight_kg > 10:
+        delay_probability += 0.03
+
+    # Older vehicles have higher breakdown risk
+    if vehicle_age >= 7:
+        delay_probability += 0.06
+    elif vehicle_age >= 5:
+        delay_probability += 0.03
+
+    # Lower-capacity hubs have higher congestion risk
+    hub_capacity = hub["capacity_per_day"]
+
+    if hub_capacity < 1800:
+        delay_probability += 0.05
+    elif hub_capacity < 2200:
+        delay_probability += 0.03
+
+    # Shipping priority
+    if shipping_priority == "Same Day":
+        delay_probability += 0.04
+    elif shipping_priority == "Express":
+        delay_probability += 0.02
+
+    # Keep probability within a reasonable range
+    delay_probability = min(delay_probability, 0.35)
+
+    # --------------------------------------------------
+    # Generate delivery outcome
+    # --------------------------------------------------
+
+    # Cancellation / return probability
+    special_status = random.choices(
+        ["Normal", "Cancelled", "Returned"],
+        weights=[90, 6, 4],
         k=1
     )[0]
 
-    # Cancelled / returned orders may not have delivery date
-    if status in ["Cancelled", "Returned"]:
+    if special_status == "Cancelled":
+
+        status = "Cancelled"
         actual_delivery_date = pd.NaT
+
+    elif special_status == "Returned":
+
+        status = "Returned"
+        actual_delivery_date = pd.NaT
+
+    else:
+
+        # Determine whether order is delayed
+        is_delayed = random.random() < delay_probability
+
+        if is_delayed:
+
+            # Delay between 1 and 3 days
+            delay_days = random.choices(
+                [1, 2, 3],
+                weights=[70, 25, 5],
+                k=1
+            )[0]
+
+            actual_delivery_date = (
+                    promised_delivery_date
+                    + timedelta(days=delay_days)
+            )
+
+            status = "Delayed"
+
+        else:
+
+            # Delivered on time, sometimes slightly early
+            # Same Day orders cannot be delivered before the order is placed
+
+            if promised_days > 0:
+
+                early_days = random.choices(
+                    [0, 1],
+                    weights=[85, 15],
+                    k=1
+                )[0]
+
+            else:
+
+                early_days = 0
+
+            actual_delivery_date = (
+                    promised_delivery_date
+                    - timedelta(days=early_days)
+            )
+
+            status = "Delivered"
+
 
     order = {
         "order_id": f"ORD{i:06d}",
@@ -163,6 +269,7 @@ for i in range(1, NUM_ORDERS + 1):
         "vehicle_id": vehicle_id,
         "assigned_employee_id": employee_id,
         "package_weight_kg": package_weight_kg,
+        "route_distance_km": route_distance_km,
         "shipping_priority": shipping_priority,
         "order_value": order_value,
         "delivery_status": status
